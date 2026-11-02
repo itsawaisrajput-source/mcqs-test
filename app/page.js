@@ -58,7 +58,11 @@ export default function Page() {
   async function parseOne(blob, name) {
     const fd = new FormData(); fd.append("file", blob, name);
     const r = await fetch("/api/parse", { method: "POST", body: fd });
-    const d = await r.json();
+    const t = await r.text();
+    let d;
+    try { d = JSON.parse(t); } catch {
+      throw new Error(r.status === 413 ? "This PDF is too large for the server. Try a smaller or compressed PDF." : r.status === 504 || /timed? ?out/i.test(t) ? "The server timed out. Try a PDF with fewer pages." : "Server error (" + r.status + "): " + t.slice(0, 80));
+    }
     if (!r.ok) throw new Error(d.error || "Error");
     return d.questions;
   }
@@ -73,7 +77,7 @@ export default function Page() {
       } else {
         // Large PDF: 10-page chunks, each with the last 3 pages appended (answer key)
         const src = await PDFDocument.load(await file.arrayBuffer());
-        const n = src.getPageCount(), step = 10, tails = [Math.max(0, n - 3), Math.max(0, n - 2), n - 1].filter((x, k, a) => a.indexOf(x) === k);
+        let step = 10; const n = src.getPageCount(), tails = [Math.max(0, n - 3), Math.max(0, n - 2), n - 1].filter((x, k, a) => a.indexOf(x) === k);
         const total = Math.ceil(n / step);
         for (let s = 0, k = 1; s < n; s += step, k++) {
           setBusy(`Processing part ${k} of ${total}…`);
@@ -82,6 +86,7 @@ export default function Page() {
           const part = await PDFDocument.create();
           (await part.copyPages(src, idx)).forEach((pg) => part.addPage(pg));
           const bytes = await part.save();
+          if (bytes.length > 3.8e6 && step > 2) { step = Math.max(2, Math.floor(step / 2)); s -= step; k--; continue; }
           all = all.concat(await parseOne(new Blob([bytes], { type: "application/pdf" }), "part.pdf"));
         }
       }
