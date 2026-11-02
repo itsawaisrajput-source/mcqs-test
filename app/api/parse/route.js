@@ -13,10 +13,10 @@ Rules:
 export async function POST(req) {
   try {
     const key = process.env.GEMINI_API_KEY;
-    if (!key) return Response.json({ error: "GEMINI_API_KEY set nahi hai (Vercel env variables)." }, { status: 500 });
+    if (!key) return Response.json({ error: "GEMINI_API_KEY is not set (Vercel environment variables)." }, { status: 500 });
     const fd = await req.formData();
     const f = fd.get("file");
-    if (!f) return Response.json({ error: "File nahi mili." }, { status: 400 });
+    if (!f) return Response.json({ error: "No file received." }, { status: 400 });
     const b64 = Buffer.from(await f.arrayBuffer()).toString("base64");
     const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -32,7 +32,7 @@ export async function POST(req) {
     let text = (d.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
     text = text.replace(/```json|```/g, "").trim();
     let arr;
-    try { arr = JSON.parse(text); } catch { return Response.json({ error: "AI ka jawab parse nahi hua. PDF chhoti karke dobara try karo." }, { status: 502 }); }
+    try { arr = JSON.parse(text); } catch { return Response.json({ error: "Couldn't read the AI response. Try a smaller PDF." }, { status: 502 }); }
     const questions = (Array.isArray(arr) ? arr : [])
       .filter((x) => x && x.q && Array.isArray(x.o) && x.o.length >= 2)
       .map((x, i) => ({
@@ -44,7 +44,7 @@ export async function POST(req) {
         t: x.t ? String(x.t) : "General",
         s: x.s === "pdf" ? "pdf" : "ai",
       }));
-    if (!questions.length) return Response.json({ error: "Koi MCQ nahi mila." }, { status: 422 });
+    if (!questions.length) return Response.json({ error: "No MCQs found." }, { status: 422 });
     return Response.json({ questions });
   } catch (e) {
     return Response.json({ error: String(e.message || e) }, { status: 500 });

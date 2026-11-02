@@ -65,18 +65,18 @@ export default function Page() {
 
   async function upload(file) {
     if (!file) return;
-    setErr(""); setBusy("MCQs nikal raha hon...");
+    setErr(""); setBusy("Extracting MCQs…");
     try {
       let all = [];
       if (file.size <= 3.5 * 1024 * 1024) {
         all = await parseOne(file, file.name);
       } else {
-        // bari PDF: 10-10 pages ke tukre + har tukre ke saath aakhri 3 pages (answer key ke liye)
+        // Large PDF: 10-page chunks, each with the last 3 pages appended (answer key)
         const src = await PDFDocument.load(await file.arrayBuffer());
         const n = src.getPageCount(), step = 10, tails = [Math.max(0, n - 3), Math.max(0, n - 2), n - 1].filter((x, k, a) => a.indexOf(x) === k);
         const total = Math.ceil(n / step);
         for (let s = 0, k = 1; s < n; s += step, k++) {
-          setBusy(`Hissa ${k}/${total} process ho raha hai...`);
+          setBusy(`Processing part ${k} of ${total}…`);
           const idx = [...Array(Math.min(step, n - s)).keys()].map((x) => x + s);
           tails.forEach((t) => { if (!idx.includes(t)) idx.push(t); });
           const part = await PDFDocument.create();
@@ -87,7 +87,7 @@ export default function Page() {
       }
       const seen = new Set();
       const qsx = all.filter((q) => { const k = q.q.toLowerCase().replace(/\s+/g, " ").slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; }).map((q, k) => ({ ...q, id: k + 1 }));
-      if (!qsx.length) throw new Error("Koi MCQ nahi mila.");
+      if (!qsx.length) throw new Error("No MCQs found in this PDF.");
       setCur({ id: Date.now(), title: file.name.replace(/\.pdf$/i, ""), questions: qsx });
       setView("preview");
     } catch (e) { setErr(e.message); }
@@ -126,7 +126,7 @@ export default function Page() {
       const mg = (a, b, k) => [...a, ...b.filter((x) => !a.some((y) => y[k] === x[k]))];
       const s2 = mg(sets, d.sets || [], "id"), a2 = mg(atts, d.atts || [], "id"), m2 = mg(marks, d.marks || [], "q");
       setSets(s2); setAtts(a2); setMarks(m2); save("sets", s2); save("atts", a2); save("marks", m2);
-    } catch { setErr("Backup file sahi nahi hai."); }
+    } catch { setErr("That backup file isn't valid."); }
   }
   const del = (id) => { const n = sets.filter((s) => s.id !== id); setSets(n); save("sets", n); };
   const avg = atts.length ? Math.round(atts.reduce((s, a) => s + (a.score / a.total) * 100, 0) / atts.length) : 0;
@@ -141,66 +141,67 @@ export default function Page() {
 
   return (
     <div className="w">
-      <div className="row sp">
-        <h1 onClick={() => setView("home")} style={{ cursor: "pointer" }}>📝 MCQ Test</h1>
+      <div className="row sp hdr">
+        <h1 className="brand" onClick={() => setView("home")}><svg width="28" height="28" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="var(--pr)" /><path d="M7.5 12.5l3 3 6-7" stroke="#fff" strokeWidth="2.4" /></svg>MCQ Test</h1>
         {supabase && (user
-          ? <span className="row"><span className="mut">{user.email}</span><button className="g" onClick={() => supabase.auth.signOut()}>Logout</button></span>
+          ? <span className="row"><span className="mut">{user.email}</span><button className="g" onClick={() => supabase.auth.signOut()}>Sign out</button></span>
           : <span className="row">
-              <button onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })}>Google login</button>
-              <button className="g" onClick={async () => { const email = prompt("Email daalo"); if (!email) return; const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } }); alert(error ? error.message : "Email par login link bheja hai"); }}>Email link</button>
+              <button onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })}>Sign in with Google</button>
+              <button className="g" onClick={async () => { const email = prompt("Enter your email"); if (!email) return; const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } }); alert(error ? error.message : "Check your inbox for the sign-in link"); }}>Sign in with email</button>
             </span>)}
       </div>
 
       {view === "home" && (<>
+        <div className="hero"><h2>Practice smarter from your own MCQ PDFs</h2><p>Upload a PDF, review the questions, take a timed test, and track your progress.</p><div className="steps"><span><b>1</b>Upload</span><span><b>2</b>Review</span><span><b>3</b>Practice</span><span><b>4</b>Improve</span></div></div>
         <div className="c">
-          <h2>PDF upload karo</h2>
-          <p className="mut">MCQs wali PDF do. Bari PDF bhi chalegi (khud tukron mein baant leta hon). Answers har question ke saath hon, end mein key ho, ya tick/bold se marked hon, sab chalega.</p>
+          <h2>Upload a PDF</h2>
+          <p className="mut">Upload a PDF of MCQs. Large files are split automatically. Answers can be next to each question, in a key at the end, or marked with a tick or bold.</p>
           <input type="file" accept="application/pdf" disabled={!!busy} onChange={(e) => upload(e.target.files[0])} />
           {busy && <p>{busy}</p>}
           {err && <p className="err">{err}</p>}
         </div>
-        {sets.length > 0 && <div className="c"><h2>Meri tests</h2>
+        {sets.length > 0 && <div className="c"><h2>My tests</h2>
           {sets.map((s) => (
             <div key={s.id} className="row sp" style={{ margin: "8px 0" }}>
               <span>{s.title} <span className="mut">({s.questions.length} MCQs)</span></span>
               <span className="row">
                 <button onClick={() => { setCur(s); setView("setup"); }}>Test</button>
                 <button className="g" onClick={() => { setCur(s); setView("preview"); }}>Edit</button>
-                <button className="r" onClick={() => del(s.id)}>X</button>
+                <button className="r" onClick={() => del(s.id)}>Delete</button>
               </span>
             </div>))}
         </div>}
         {atts.length > 0 && <div className="c"><h2>Progress</h2>
-          <p>Tests: <b>{atts.length}</b> · Average: <b>{avg}%</b></p>
+          <div className="stats"><div><b>{atts.length}</b><span>Tests taken</span></div><div><b>{avg}%</b><span>Average score</span></div><div><b>{streak}</b><span>Day streak</span></div></div>
           <div className="bars">{[...atts].reverse().slice(-20).map((a) => <div key={a.id} className="bar" title={`${a.title}: ${a.score}/${a.total}`} style={{ height: Math.max(4, (a.score / a.total) * 100) + "%" }} />)}</div>
-          <p className="mut">Har bar = ek test ka score% (purane se naye)</p>
+          <p className="mut">Each bar is one test's score, oldest to newest</p>
           {atts.slice(0, 8).map((a) => <div key={a.id} className="row sp mut"><span>{a.date} · {a.title}</span><b>{a.score}/{a.total}</b></div>)}
         </div>}
         <div className="c">
-          <h2>Tools</h2>
-          <p>🔥 Streak: <b>{streak}</b> din · ★ Bookmarks: <b>{marks.length}</b></p>
-          {weak.length > 0 && <><b>Kamzor topics</b>{weak.map(([t, pc, n]) => <div key={t} className="row sp mut"><span>{t}</span><b>{pc}% ({n} q)</b></div>)}</>}
+          <h2>Insights</h2>
+          <p>Streak: <b>{streak}</b> days · Bookmarks: <b>{marks.length}</b></p>
+          {weak.length > 0 && <><b>Weak topics</b>{weak.map(([t, pc, n]) => <div key={t} className="row sp mut"><span>{t}</span><b>{pc}% ({n} q)</b></div>)}</>}
           <div className="row" style={{ marginTop: 8 }}>
             {marks.length > 0 && <button onClick={() => startList("Bookmarks", marks)}>Bookmarked test</button>}
-            <button className="g" onClick={exportAll}>Backup / Share download</button>
-            <label className="b g" style={{ background: "#e5e7eb", color: "#111" }}>Backup import<input type="file" accept=".json" hidden onChange={(e) => importAll(e.target.files[0])} /></label>
+            <button className="g" onClick={exportAll}>Export backup</button>
+            <label className="b g" style={{ background: "#e5e7eb", color: "#111" }}>Import backup<input type="file" accept=".json" hidden onChange={(e) => importAll(e.target.files[0])} /></label>
           </div>
-          <p className="mut">Backup file se data doosre phone/laptop par ya dost ko bheja ja sakta hai.</p>
+          <p className="mut">Use a backup file to move your data to another device or share it.</p>
         </div>
       </>)}
 
       {view === "preview" && cur && (<>
         <div className="c">
           <h2>{cur.title}: {cur.questions.length} MCQs</h2>
-          <p className="mut">Sahi answer galat ho to option par click karke theek kar do. <span className="tag">AI answer</span> wale questions check kar lo (PDF mein answer nahi mila tha).</p>
-          <div className="row"><button onClick={saveSet}>Save karo ➜ Test</button><button className="g" onClick={() => setView("home")}>Wapas</button></div>
+          <p className="mut">If an answer is wrong, click the correct option to fix it. Questions marked <span className="tag">AI answer</span> had no answer in the PDF, so please verify them.</p>
+          <div className="row"><button onClick={saveSet}>Save and continue</button><button className="g" onClick={() => setView("home")}>Back</button></div>
         </div>
         {cur.questions.map((q, k) => (
           <div className="c" key={q.id}>
             <div className="row sp"><b>{k + 1}. {q.q}</b>
-              <button className="r" onClick={() => upd((a) => a.filter((x) => x.id !== q.id))}>🗑</button></div>
+              <button className="r" onClick={() => upd((a) => a.filter((x) => x.id !== q.id))}>Delete</button></div>
             {q.s === "ai" && <span className="tag">AI answer</span>}
-            {q.a < 0 && <span className="tag err"> answer select karo</span>}
+            {q.a < 0 && <span className="tag err"> Select the correct answer</span>}
             {q.o.map((o, j) => <button key={j} className={"o " + (q.a === j ? "ok" : "")} onClick={() => upd((a) => a.map((x) => x.id === q.id ? { ...x, a: j, s: "pdf" } : x))}>{L[j]}. {o}</button>)}
           </div>))}
       </>)}
@@ -208,40 +209,42 @@ export default function Page() {
       {view === "setup" && cur && (
         <div className="c">
           <h2>{cur.title}</h2>
-          <p>Kitne questions (max {cur.questions.length}): <input type="number" min="1" value={cfg.count} onChange={(e) => setCfg({ ...cfg, count: +e.target.value })} /></p>
-          <p>Timer (minute, 0 = off): <input type="number" min="0" value={cfg.min} onChange={(e) => setCfg({ ...cfg, min: +e.target.value })} /></p>
+          <p>Number of questions (max {cur.questions.length}): <input type="number" min="1" value={cfg.count} onChange={(e) => setCfg({ ...cfg, count: +e.target.value })} /></p>
+          <p>Timer in minutes (0 = off): <input type="number" min="0" value={cfg.min} onChange={(e) => setCfg({ ...cfg, min: +e.target.value })} /></p>
           <p><label><input type="checkbox" checked={cfg.shuf} onChange={(e) => setCfg({ ...cfg, shuf: e.target.checked })} /> Random order</label></p>
-          <button onClick={() => start(cur.questions)}>Test shuru karo</button>
+          <button onClick={() => start(cur.questions)}>Start test</button>
         </div>)}
 
       {view === "test" && qs[i] && (<div className="c">
-        <div className="row sp"><b>{i + 1} / {qs.length}</b>{cfg.min > 0 && <b>⏱ {Math.floor(Math.max(0, left) / 60)}:{String(Math.max(0, left) % 60).padStart(2, "0")}</b>}</div>
+        <div className="row sp"><b>{i + 1} / {qs.length}</b>{cfg.min > 0 && <b>{Math.floor(Math.max(0, left) / 60)}:{String(Math.max(0, left) % 60).padStart(2, "0")}</b>}</div>
+        <div className="pb"><div style={{ width: ((i + 1) / qs.length) * 100 + "%" }} /></div>
+        <div className="nav">{qs.map((_, k) => <button key={k} className={"nv" + (k === i ? " cur" : "") + (ans[k] >= 0 ? " dn" : "")} onClick={() => setI(k)} aria-label={"Question " + (k + 1)}>{k + 1}</button>)}</div>
         <h2>{qs[i].q}</h2>
         {qs[i].o.map((o, j) => <button key={j} className={"o " + (ans[i] === j ? "s" : "")} onClick={() => setAns(ans.map((x, k) => k === i ? j : x))}>{L[j]}. {o}</button>)}
-        <button className="g" onClick={() => toggleMark(qs[i])}>{isMark(qs[i]) ? "★" : "☆"} Bookmark</button>
+        <button className="g" onClick={() => toggleMark(qs[i])}>{isMark(qs[i]) ? "Bookmarked" : "Bookmark"}</button>
         <div className="row sp" style={{ marginTop: 12 }}>
-          <button className="g" disabled={i === 0} onClick={() => setI(i - 1)}>◀ Pichla</button>
-          {i < qs.length - 1 ? <button onClick={() => setI(i + 1)}>Agla ▶</button> : <button onClick={finish}>Submit</button>}
+          <button className="g" disabled={i === 0} onClick={() => setI(i - 1)}>Previous</button>
+          {i < qs.length - 1 ? <button onClick={() => setI(i + 1)}>Next</button> : <button onClick={finish}>Submit</button>}
         </div>
-        <p className="mut">Jawab diye: {ans.filter((x) => x >= 0).length}/{qs.length} · <a href="#" onClick={(e) => { e.preventDefault(); if (confirm("Test submit karen?")) finish(); }}>abhi submit</a></p>
+        <p className="mut">Answered: {ans.filter((x) => x >= 0).length}/{qs.length} · <a href="#" onClick={(e) => { e.preventDefault(); if (confirm("Submit the test?")) finish(); }}>submit now</a></p>
       </div>)}
 
       {view === "result" && res && (<>
         <div className="c">
-          <h2>Score: {res.score}/{res.total} ({Math.round((res.score / res.total) * 100)}%)</h2>
+          <div className="score"><div className="ring" style={{ "--p": Math.round((res.score / res.total) * 100) }}><b>{Math.round((res.score / res.total) * 100)}%</b></div><div><h2>{res.score} of {res.total} correct</h2><p className="mut">{res.wrong.length} to review</p></div></div>
           <div className="row">
-            {res.wrong.length > 0 && <button onClick={() => start(res.wrong)}>Galat answers dobara ({res.wrong.length})</button>}
-            <button className="g" onClick={() => setView("setup")}>Dobara test</button>
+            {res.wrong.length > 0 && <button onClick={() => start(res.wrong)}>Retry incorrect ({res.wrong.length})</button>}
+            <button className="g" onClick={() => setView("setup")}>Retake</button>
             <button className="g" onClick={() => window.print()}>PDF / Print</button>
             <button className="g" onClick={() => setView("home")}>Home</button>
           </div>
         </div>
         {res.qs.map((q, k) => (<div className="c" key={k}>
           <b>{k + 1}. {q.q}</b>
-          {q.o.map((o, j) => <div key={j} className={"o " + (j === q.a ? "ok" : res.ans[k] === j ? "bad" : "")} style={{ padding: 10, borderRadius: 8 }}>{L[j]}. {o}{res.ans[k] === j ? " ← aap ka jawab" : ""}</div>)}
-          {res.ans[k] < 0 && <p className="err">Chhora hua</p>}
-          <button className="g" onClick={() => toggleMark(q)}>{isMark(q) ? "★ Bookmarked" : "☆ Bookmark"}</button>
-          {q.e && <p className="mut">💡 {q.e}</p>}
+          {q.o.map((o, j) => <div key={j} className={"o " + (j === q.a ? "ok" : res.ans[k] === j ? "bad" : "")} style={{ padding: 10, borderRadius: 8 }}>{L[j]}. {o}{res.ans[k] === j ? " (your answer)" : ""}</div>)}
+          {res.ans[k] < 0 && <p className="err">Skipped</p>}
+          <button className="g" onClick={() => toggleMark(q)}>{isMark(q) ? "Bookmarked" : "Bookmark"}</button>
+          {q.e && <p className="mut">Explanation: {q.e}</p>}
         </div>))}
       </>)}
     </div>
